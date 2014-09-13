@@ -75,6 +75,7 @@ class EsriJSON2Pg(object):
             self.oidrange = {}
 
     def checkOIDrange(self, webconn, url):
+        ## TODO: how to handle an "objectid" field that's not called "objectid"?
         """[{
             "statisticType": "count",
             "onStatisticField": "objectid", 
@@ -89,8 +90,15 @@ class EsriJSON2Pg(object):
             "outStatisticFieldName": "oidmax"
           }]
         """
-        #### TO-DO: figure out an elegant way of handling non-standard paths
-        webconn.request('GET', "/arcgis/rest/services/?f=pjson")
+
+        ## Handle non-standard ArcGIS Server paths
+        pathroot = "/arcgis/rest/services/"
+        dpr = re.match(r"/(\w*)/rest/services", url, re.IGNORECASE)
+        if(dpr):
+            print "Non-standard ArcGIS Server url."
+            webconn.request('GET', '/{0}/rest/services/?f=pjson'.format(dpr.group(1)))
+        else:
+            webconn.request('GET', "/arcgis/rest/services/?f=pjson")
         webresp = webconn.getresponse()
         version = json.loads(webresp.read())['currentVersion']
         if(version >= 10.1):
@@ -104,11 +112,12 @@ class EsriJSON2Pg(object):
             if(version >= 10.1):
                 oid = response['features'][0]['attributes']
             else: 
-                oid = {'oidmin':0, 'oidmax':response['count']}
+                oid = {'OIDMIN':0, 'OIDMAX':response['count']}  ## look into why certain instances return this in all caps versus all lower
             self.oidrange = oid
-            return [(f, f+999) for f in xrange(oid['oidmin'], oid['oidmax'], 1000)]
+            return [(f, f+999) for f in xrange(oid['OIDMIN'], oid['OIDMAX'], 1000)]
             #### TO-DO: probably should have it look for maxRecordCount to populate the range
         except Exception, e:
+            print "Encountered an error:"
             print e
             print url+qs
             print response
