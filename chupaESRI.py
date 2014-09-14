@@ -93,9 +93,9 @@ class EsriJSON2Pg(object):
 
         ## Handle non-standard ArcGIS Server paths
         pathroot = "/arcgis/rest/services/"
-        dpr = re.match(r"/(\w*)/rest/services", url, re.IGNORECASE)
+        dpr = re.match(r"/([\w\/]*)/rest/services", url, re.IGNORECASE)
         if(dpr):
-            print "Non-standard ArcGIS Server url."
+            print "Base ArcGIS Server url: /{0}/rest/services/".format(dpr.group(1))
             webconn.request('GET', '/{0}/rest/services/?f=pjson'.format(dpr.group(1)))
         else:
             webconn.request('GET', "/arcgis/rest/services/?f=pjson")
