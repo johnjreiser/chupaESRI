@@ -28,6 +28,7 @@
 
 import re, httplib
 import simplejson as json
+import traceback
 
 class EsriJSON2Pg(object):
     """Convert ESRI JSON response from ArcGIS Server's Query service to PostgreSQL CREATE TABLE and INSERTs."""
@@ -112,11 +113,11 @@ class EsriJSON2Pg(object):
             if(version >= 10.1):
                 oid = response['features'][0]['attributes']
             else: 
-                oid = {'OIDMIN':0, 'OIDMAX':response['count']}  ## look into why certain instances return this in all caps versus all lower
+                oid = {'oidmin':0, 'oidmax':response['count']}  ## look into why certain instances return this in all caps versus all lower
             self.oidrange = oid
-            return [(f, f+999) for f in xrange(oid['OIDMIN'], oid['OIDMAX'], 1000)]
+            return [(f, f+999) for f in xrange(oid['oidmin'], oid['oidmax'], 1000)]
             #### TO-DO: probably should have it look for maxRecordCount to populate the range
-        except Exception, e:
+        except Exception as e:
             print "Encountered an error:"
             print e
             print url+qs
@@ -190,21 +191,24 @@ class EsriJSON2Pg(object):
             return None
         if(indx > -1):
             geom = self.srcjson['features'][indx]['geometry']
-        if(len(geom['rings']) == 0):
-            return None
-        for ring in geom['rings']:
-            if len(ring) <= 3:
+        if('rings' in geom):
+            if(len(geom['rings']) == 0):
                 return None
-        if self.geomType in ("POLYGON","MULTIPOLYGON"):
-            WKT = "SRID={0};{1}".format(self.sr, self.geomType) + str(geom['rings']).replace("[","(").replace("]",")")
-            WKT = re.sub('(\d),', '\1', WKT)
-            return WKT.replace("), (", ",").replace(u"\x01", "")
-        if self.geomType in ("LINESTRING", "MULTILINESTRING"):
-            pass
-            ## TO-DO: write this.  
-        if self.geomType in ("POINT"):
-            WKT = "SRID={0};{1}({2} {3})".format(self.sr, self.geomType, geom['x'], geom['y'])
-            return WKT
+            for ring in geom['rings']:
+                if len(ring) <= 3:
+                    return None
+            if self.geomType in ("POLYGON","MULTIPOLYGON"):
+                WKT = "SRID={0};{1}".format(self.sr, self.geomType) + str(geom['rings']).replace("[","(").replace("]",")")
+                WKT = re.sub('(\d),', '\1', WKT)
+                return WKT.replace("), (", ",").replace(u"\x01", "")
+            if self.geomType in ("LINESTRING", "MULTILINESTRING"):
+                pass
+                ## TO-DO: write this.  
+        else:
+            if self.geomType in ("POINT"):
+                WKT = "SRID={0};{1}({2} {3})".format(self.sr, self.geomType, geom['x'], geom['y'])
+                return WKT
+        return None
     
     def insertStatements(self, tablename="{tablename}", upsert=False):
         i = 0
@@ -271,5 +275,6 @@ if __name__ == "__main__":
             conn.commit()
         except Exception, e:
             print e
+            print traceback.format_exc()
             print "Failed on: ",path+qs
             break
