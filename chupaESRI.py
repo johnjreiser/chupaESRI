@@ -246,7 +246,7 @@ if __name__ == "__main__":
     domain = urlm.groups()[0]
     path   = urlm.groups()[1]
     print domain
-    if(sys.argv[1].lower() == 's'):
+    if(sys.argv[1][:5].lower() == 'https'):
         webconn = httplib.HTTPSConnection(domain, timeout=360)
     else:
         webconn = httplib.HTTPConnection(domain, timeout=360)
