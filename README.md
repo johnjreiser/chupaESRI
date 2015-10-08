@@ -14,8 +14,8 @@ Think "[chupacabra](http://en.wikipedia.org/wiki/Chupacabra)" or "[Chupa Chups](
 ## Usage
 When run from the command line, the tool will extract all features from a [Map Service Query](http://resources.arcgis.com/en/help/arcgis-rest-api/index.html#/Query_Map_Service_Layer/02r3000000p1000000/) endpoint. You must also specify a PostgreSQL connection string and the name of the table where the extracted data will be stored. 
 
-When accessed as a module, the EsriJSON2Pg class is available, with the following methods:
-
+When accessed as a module, the EsriJSON2Pg class is available to you to incorporate into your own projects. See the main method for examples on its use. 
+  
 
 ## How to Use
 Have you encountered an ArcGIS Server instance that contains data that you would like to use, but are limited by the functionality provided by the Map Service?
