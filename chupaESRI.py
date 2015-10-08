@@ -195,11 +195,11 @@ class EsriJSON2Pg(object):
             if(len(geom['rings']) == 0):
                 return None
             for ring in geom['rings']:
-                if len(ring) <= 3:
+                if len(ring) < 3:
                     return None
             if self.geomType in ("POLYGON","MULTIPOLYGON"):
                 WKT = "SRID={0};{1}".format(self.sr, self.geomType) + str(geom['rings']).replace("[","(").replace("]",")")
-                WKT = re.sub('(\d),', '\1', WKT)
+                WKT = re.sub(r'(\d)\,', r'\1', WKT)
                 return WKT.replace("), (", ",").replace(u"\x01", "")
             if self.geomType in ("LINESTRING", "MULTILINESTRING"):
                 pass
