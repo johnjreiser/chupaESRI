@@ -34,7 +34,8 @@ class EsriJSON2Pg(object):
     """Convert ESRI JSON response from ArcGIS Server's Query service to PostgreSQL CREATE TABLE and INSERTs."""
     def __init__(self, jsonstr):
         if(type(jsonstr) == type("") and len(jsonstr) > 0):
-            self.srcjson = json.loads(jsonstr)
+            cleanjson = re.sub(r'\\r\\n', '\\r\\n', jsonstr)
+            self.srcjson = json.loads(cleanjson)
             esriTypes = {
                 "esriGeometryNull": "GEOMETRY",
                 "esriGeometryPoint": "POINT",
