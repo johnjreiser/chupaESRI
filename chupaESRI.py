@@ -1,18 +1,21 @@
 #!/usr/bin/env python
 # chupaESRI.py
-# version: 0.1 (2014-01-21)
+# version: 0.2 (2015-10-15)
 # author: John Reiser <jreiser@njgeo.org>
 #
-# ChupaESRI provides you with functions to make importing features returned from a 
+# ChupaESRI provides you with functions to make importing features returned from a
 # ArcGIS Server Map Service Query request into a PostgreSQL database.
 # When run from the command line with the sufficient number of arguments, the script
-# will extract all point or polygon features from a service and import them into a new 
+# will extract all point or polygon features from a service and import them into a new
 # PostGIS table.
+#
+# Changes
+# 0.2 - revised escaped character handling; added "fudge factor" to character varying type
 #
 # Feel free to contact the author with questions or comments.
 # Any feedback or info on how this is being used is greatly appreciated.
 #
-# Copyright (C) 2014, John Reiser
+# Copyright (C) 2014, 2015 John Reiser
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
@@ -34,7 +37,7 @@ class EsriJSON2Pg(object):
     """Convert ESRI JSON response from ArcGIS Server's Query service to PostgreSQL CREATE TABLE and INSERTs."""
     def __init__(self, jsonstr):
         if(type(jsonstr) == type("") and len(jsonstr) > 0):
-            self.srcjson = json.loads(jsonstr)
+            self.srcjson = json.loads( jsonstr, strict=False )
             esriTypes = {
                 "esriGeometryNull": "GEOMETRY",
                 "esriGeometryPoint": "POINT",
@@ -54,7 +57,7 @@ class EsriJSON2Pg(object):
                 "esriGeometryTriangleFan": "MULTISURFACE",
                 "esriGeometryTriangles": "MULTISURFACE"
             }
-            if self.srcjson.has_key("geometryType"):    
+            if self.srcjson.has_key("geometryType"):
                 self.geomType = esriTypes[ self.srcjson['geometryType'] ]
             else:
                 self.geomType = None
@@ -79,15 +82,15 @@ class EsriJSON2Pg(object):
         ## TODO: how to handle an "objectid" field that's not called "objectid"?
         """[{
             "statisticType": "count",
-            "onStatisticField": "objectid", 
+            "onStatisticField": "objectid",
             "outStatisticFieldName": "oidcount"
           },{
             "statisticType": "min",
-            "onStatisticField": "objectid", 
+            "onStatisticField": "objectid",
             "outStatisticFieldName": "oidmin"
           },{
             "statisticType": "max",
-            "onStatisticField": "objectid", 
+            "onStatisticField": "objectid",
             "outStatisticFieldName": "oidmax"
           }]
         """
@@ -112,7 +115,7 @@ class EsriJSON2Pg(object):
             response = json.loads(webresp.read())
             if(version >= 10.1):
                 oid = response['features'][0]['attributes']
-            else: 
+            else:
                 oid = {'oidmin':0, 'oidmax':response['count']}  ## look into why certain instances return this in all caps versus all lower
             self.oidrange = oid
             return [(f, f+999) for f in xrange(oid['oidmin'], oid['oidmax'], 1000)]
@@ -124,6 +127,7 @@ class EsriJSON2Pg(object):
             print response
 
     def convertFields(self):
+        fudge = 5 # default value to pad out character varying types
         ft = { ## from http://edndoc.esri.com/arcobjects/9.2/ComponentHelp/esriGeodatabase/esriFieldType.htm
             "esriFieldTypeSmallInteger": "integer",
             "esriFieldTypeInteger": "integer",
@@ -145,8 +149,10 @@ class EsriJSON2Pg(object):
                 # remove duplicate names
                 if not field['name'] in map(lambda x: x['name'], fo):
                     for item in ("length", "alias"):
-                        if f.has_key(item):      
+                        if f.has_key(item):
                             field[item] = f[item]
+                            if item == 'length' and f.has_key('type') and f['type'] == "esriFieldTypeString":
+                                field[item] = int(field[item]) + fudge # padding to help with escaped characters
                     if f.has_key('type'):
                         field['type'] = ft[ f['type'] ]
                         if field['type'] in ('date', 'uuid', 'integer', 'bigint', 'smallint'):
@@ -185,7 +191,7 @@ class EsriJSON2Pg(object):
                 if not f['name'] == f['alias']:
                     sql = sql + "\nCOMMENT ON COLUMN {0}.".format(tablename) + f['name'] + " IS '" + f['alias'] + "';"
         return sql
-    
+
     def changeGeometry(self, geom=None, indx=None):
         if(geom == indx == None):
             return None
@@ -195,7 +201,7 @@ class EsriJSON2Pg(object):
             if(len(geom['rings']) == 0):
                 return None
             for ring in geom['rings']:
-                if len(ring) < 3:
+                if len(ring) <= 3: # needed to trim slivers/self-intersections
                     return None
             if self.geomType in ("POLYGON","MULTIPOLYGON"):
                 WKT = "SRID={0};{1}".format(self.sr, self.geomType) + str(geom['rings']).replace("[","(").replace("]",")")
@@ -203,13 +209,13 @@ class EsriJSON2Pg(object):
                 return WKT.replace("), (", ",").replace(u"\x01", "")
             if self.geomType in ("LINESTRING", "MULTILINESTRING"):
                 pass
-                ## TO-DO: write this.  
+                ## TO-DO: write this.
         else:
             if self.geomType in ("POINT"):
                 WKT = "SRID={0};{1}({2} {3})".format(self.sr, self.geomType, geom['x'], geom['y'])
                 return WKT
         return None
-    
+
     def insertStatements(self, tablename="{tablename}", upsert=False):
         i = 0
         while i < len(self.srcjson['features']):
@@ -225,7 +231,7 @@ class EsriJSON2Pg(object):
                     sql = "INSERT INTO {0} ({1}) VALUES ({2});".format(tablename, ",".join(map(lambda x: x['name'], self.fields)), ",".join(map(lambda x: "%("+x['name']+")s", self.fields)))
                 yield (sql, data)
             i += 1
-        
+
 
 if __name__ == "__main__":
     import sys
@@ -237,7 +243,7 @@ if __name__ == "__main__":
     # example: "host=localhost dbname=gisdata user=gisadmin password=P4ssW0rd"
     # argv[3]: Schema-qualified table name
     # example: "gisdata.tablename"
-    
+
     if len(sys.argv) < 4:
         print "Too few parameters.\nUSAGE: {0} restapiurl pgconnstr tblname".format(sys.argv[0])
         sys.exit(2)
@@ -255,7 +261,7 @@ if __name__ == "__main__":
     ct = True # flag for creating a table
     conn = psycopg2.connect(sys.argv[2])
     cur = conn.cursor()
-    
+
     for l in oids:
         print "Requesting {0} <= objectid <= {1}".format(l[0],l[1])
         try:
