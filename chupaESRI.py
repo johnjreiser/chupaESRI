@@ -259,26 +259,30 @@ if __name__ == "__main__":
         webconn = httplib.HTTPConnection(domain, timeout=360)
     oids = EsriJSON2Pg("").checkOIDrange(webconn, path)
 
-    ct = True # flag for creating a table
     conn = psycopg2.connect(sys.argv[2])
     cur = conn.cursor()
 
+    ct = True # flag for creating a table
     tblsql = "select 1 from pg_tables where schemaname = %s and tablename = %s"
     cur.execute(tblsql,sys.argv[3].split('.'))
     if cur.rowcount > 0:
+        print "Table exists."
         ct = False
+    else:
+        print "Table does not exist."
 
     for l in oids:
         print "Requesting {0} <= objectid <= {1}".format(l[0],l[1])
-        try:
-            chksql = "select 1 from {0} where objectid between %s and %s".format(sys.argv[3])
-            cur.execute(chksql, l)
-            if cur.rowcount > 0:
-                print "Record exist; skipping {0} through {1}".format(*l)
-                continue
-        except Exception, e:
-            print e
-            print traceback.format_exc()
+        if not ct:
+            try:
+                chksql = "select 1 from {0} where objectid between %s and %s".format(sys.argv[3])
+                cur.execute(chksql, l)
+                if cur.rowcount > 0:
+                    print "Record exist; skipping {0} through {1}".format(*l)
+                    continue
+            except Exception, e:
+                print e
+                print traceback.format_exc()
         
         try:
             qs = "?where=objectid+>%3D+{0}+AND+objectid+<%3D+{1}&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=true&maxAllowableOffset=&geometryPrecision=&outSR=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&returnDistinctValues=false&f=pjson".format(l[0],l[1])
