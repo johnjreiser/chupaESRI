@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # chupaESRI.py
-# version: 0.2 (2015-10-15)
+# version: 0.3 (2017-09-03)
 # author: John Reiser <jreiser@njgeo.org>
 #
 # ChupaESRI provides you with functions to make importing features returned from a
@@ -10,12 +10,13 @@
 # PostGIS table.
 #
 # Changes
+# 0.3 - checks for the existence of the table and if objectids have already been downloaded
 # 0.2 - revised escaped character handling; added "fudge factor" to character varying type
 #
 # Feel free to contact the author with questions or comments.
 # Any feedback or info on how this is being used is greatly appreciated.
 #
-# Copyright (C) 2014, 2015 John Reiser
+# Copyright (C) 2014 John Reiser
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
