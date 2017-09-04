@@ -262,16 +262,24 @@ if __name__ == "__main__":
     conn = psycopg2.connect(sys.argv[2])
     cur = conn.cursor()
 
+    dbmax = -1 # highest record in database table
     ct = True # flag for creating a table
     tblsql = "select 1 from pg_tables where schemaname = %s and tablename = %s"
     cur.execute(tblsql,sys.argv[3].split('.'))
     if cur.rowcount > 0:
         print "Table exists."
         ct = False
+        maxsql = "select max(objectid) from {0}".format(sys.argv[3])
+        cur.execute(maxsql)
+        row = cur.next()
+        dbmax = row[0]
+        print "Highest OID in table: {0}".format(dbmax)
     else:
         print "Table does not exist."
 
     for l in oids:
+        if dbmax >= l[1]:
+            continue
         print "Requesting {0} <= objectid <= {1}".format(l[0],l[1])
         if not ct:
             try:
@@ -303,4 +311,4 @@ if __name__ == "__main__":
             print e
             print traceback.format_exc()
             print "Failed on: ",path+qs
-            break
+            sys.exit(2)
