@@ -115,9 +115,10 @@ class EsriJSON2Pg(object):
             webresp = webconn.getresponse()
             response = json.loads(webresp.read())
             if(version >= 10.1):
-                oid = response['features'][0]['attributes']
+                # force keys to lowercase - not always returned lower
+                oid = dict((k.lower(),v) for k,v in response['features'][0]['attributes'].iteritems()) 
             else:
-                oid = {'oidmin':0, 'oidmax':response['count']}  ## look into why certain instances return this in all caps versus all lower
+                oid = {'oidmin':0, 'oidmax':response['count']}
             self.oidrange = oid
             return [(f, f+999) for f in xrange(oid['oidmin'], oid['oidmax'], 1000)]
             #### TO-DO: probably should have it look for maxRecordCount to populate the range
