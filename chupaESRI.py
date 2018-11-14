@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # chupaESRI.py
-# version: 0.3 (2017-09-03)
+# version: 0.4 (2018-11)
 # author: John Reiser <jreiser@njgeo.org>
 #
 # ChupaESRI provides you with functions to make importing features returned from a
@@ -10,6 +10,7 @@
 # PostGIS table.
 #
 # Changes
+# 0.4 - argparse and additional options
 # 0.3 - checks for the existence of the table and if objectids have already been downloaded
 # 0.2 - revised escaped character handling; added "fudge factor" to character varying type
 #
@@ -238,6 +239,7 @@ class EsriJSON2Pg(object):
 if __name__ == "__main__":
     import sys
     import psycopg2
+    import argparse
     # run on the command line:
     # argv[1]: ArcGIS Server REST API, query endpoint
     # example: "http://example.com:6080/rest/services/Base/MapServer/0/query"
@@ -246,31 +248,36 @@ if __name__ == "__main__":
     # argv[3]: Schema-qualified table name
     # example: "gisdata.tablename"
 
-    if len(sys.argv) < 4:
-        print "Too few parameters.\nUSAGE: {0} restapiurl pgconnstr tblname".format(sys.argv[0])
-        sys.exit(2)
+    parser = argparse.ArgumentParser(description='chupaESRI: download features from ArcGIS Server REST MapServer endpoints.') 
+    parser.add_argument('rest', help='URL to the ArcGIS Server REST Query Endpoint')
+    parser.add_argument('pgconn', help='PostgreSQL connection string')
+    parser.add_argument('table', help='Schema-qualified table name (e.g. public.housingpts)')
+    parser.add_argument('-o', '--oids', nargs=2, type=int, help='Request a specific set of OBJECTIDs, low and high bounds')
+    parser.add_argument('-n', '--chunk', nargs=1, type=int, default=1000, help='Size of each request. Default 1000.')
 
-    urlm = re.match("https?://([\w\:\.\-]+)(/.*)", sys.argv[1])
+    argv = parser.parse_args()
+
+    urlm = re.match("https?://([\w\:\.\-]+)(/.*)", argv.rest)
     domain = urlm.groups()[0]
     path   = urlm.groups()[1]
     print domain
-    if(sys.argv[1][:5].lower() == 'https'):
+    if(argv.rest[:5].lower() == 'https'):
         webconn = httplib.HTTPSConnection(domain, timeout=360)
     else:
         webconn = httplib.HTTPConnection(domain, timeout=360)
     oids = EsriJSON2Pg("").checkOIDrange(webconn, path)
 
-    conn = psycopg2.connect(sys.argv[2])
+    conn = psycopg2.connect(argv.pgconn)
     cur = conn.cursor()
 
     dbmax = -1 # highest record in database table
     ct = True # flag for creating a table
     tblsql = "select 1 from pg_tables where schemaname = %s and tablename = %s"
-    cur.execute(tblsql,sys.argv[3].split('.'))
+    cur.execute(tblsql,argv.table.split('.'))
     if cur.rowcount > 0:
         print "Table exists."
         ct = False
-        maxsql = "select max(objectid) from {0}".format(sys.argv[3])
+        maxsql = "select max(objectid) from {0}".format(argv.table)
         cur.execute(maxsql)
         row = cur.next()
         dbmax = row[0]
@@ -284,7 +291,7 @@ if __name__ == "__main__":
         print "Requesting {0} <= objectid <= {1}".format(l[0],l[1])
         if not ct:
             try:
-                chksql = "select 1 from {0} where objectid between %s and %s".format(sys.argv[3])
+                chksql = "select 1 from {0} where objectid between %s and %s".format(argv.table)
                 cur.execute(chksql, l)
                 if cur.rowcount > 0:
                     print "Record exist; skipping {0} through {1}".format(*l)
@@ -300,10 +307,10 @@ if __name__ == "__main__":
             arcjson = webresp.read()
             jp = EsriJSON2Pg(arcjson)
             if ct:
-                cur.execute(jp.createTable(sys.argv[3]))
+                cur.execute(jp.createTable(argv.table))
                 ct = False
             i = 0
-            for data in jp.insertStatements(tablename=sys.argv[3]):
+            for data in jp.insertStatements(tablename=argv.table):
                 if not data[1] == None:
                     cur.execute(data[0], data[1])
                 i += 1
