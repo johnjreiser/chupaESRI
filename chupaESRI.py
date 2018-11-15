@@ -10,6 +10,7 @@
 # PostGIS table.
 #
 # Changes
+# 0.4 - additional logging
 # 0.3 - checks for the existence of the table and if objectids have already been downloaded
 # 0.2 - revised escaped character handling; added "fudge factor" to character varying type
 #
@@ -33,6 +34,9 @@
 import re, httplib
 import simplejson as json
 import traceback
+import logging
+
+logging.basicConfig(filename='chupa.log', level=logging.DEBUG)
 
 class EsriJSON2Pg(object):
     """Convert ESRI JSON response from ArcGIS Server's Query service to PostgreSQL CREATE TABLE and INSERTs."""
@@ -40,7 +44,7 @@ class EsriJSON2Pg(object):
         if(type(jsonstr) == type("") and len(jsonstr) > 0):
             self.srcjson = json.loads( jsonstr, strict=False )
             esriTypes = {
-                "esriGeometryNull": "GEOMETRY",
+                "esriGeometryNull": None,
                 "esriGeometryPoint": "POINT",
                 "esriGeometryMultipoint": "MULTIPOINT",
                 "esriGeometryLine": "LINESTRING",
@@ -100,20 +104,28 @@ class EsriJSON2Pg(object):
         pathroot = "/arcgis/rest/services/"
         dpr = re.match(r"/([\w\/]*)/rest/services", url, re.IGNORECASE)
         if(dpr):
-            print "Base ArcGIS Server url: /{0}/rest/services/".format(dpr.group(1))
+            logging.info("Base ArcGIS Server url: /{0}/rest/services/".format(dpr.group(1)) )
             webconn.request('GET', '/{0}/rest/services/?f=pjson'.format(dpr.group(1)))
         else:
             webconn.request('GET', "/arcgis/rest/services/?f=pjson")
-        webresp = webconn.getresponse()
-        version = json.loads(webresp.read())['currentVersion']
+        webresp = webconn.getresponse().read()
+        logging.debug(webresp)
+        version = json.loads(webresp)['currentVersion']
+        logging.debug("ArcGIS Version: {0}".format(version) )
         if(version >= 10.1):
             qs = """?where=&outFields=*&returnGeometry=false&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=[{%0D%0A++++"statisticType"%3A+"count"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidcount"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"min"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidmin"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"max"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidmax"%0D%0A++}]&returnZ=false&returnM=false&returnDistinctValues=false&f=pjson"""
+            logging.debug('Version greater than or equal to 10.1')
+            logging.debug(qs)
         else:
             qs = """?text=&geometry=&geometryType=esriGeometryPoint&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&objectIds=&where=objectid+>+-1&time=&returnCountOnly=true&returnIdsOnly=false&returnGeometry=false&maxAllowableOffset=&outSR=&outFields=&f=pjson"""
+            logging.debug('Version less than 10.1')
+            logging.debug(qs)
         try:
             webconn.request('GET', url+qs)
             webresp = webconn.getresponse()
             response = json.loads(webresp.read())
+            logging.debug('>>> OID calculation response >>>')
+            logging.debug(response)
             if(version >= 10.1):
                 # force keys to lowercase - not always returned lower
                 oid = dict((k.lower(),v) for k,v in response['features'][0]['attributes'].iteritems()) 
@@ -123,10 +135,9 @@ class EsriJSON2Pg(object):
             return [(f, f+999) for f in xrange(oid['oidmin'], oid['oidmax'], 1000)]
             #### TO-DO: probably should have it look for maxRecordCount to populate the range
         except Exception as e:
-            print "Encountered an error:"
-            print e
-            print url+qs
-            print response
+            logging.debug(url+qs)
+            logging.debug(response)
+            logging.error(e)
 
     def convertFields(self):
         fudge = 5 # default value to pad out character varying types
@@ -156,8 +167,11 @@ class EsriJSON2Pg(object):
                             if item == 'length' and f.has_key('type') and f['type'] == "esriFieldTypeString":
                                 field[item] = int(field[item]) + fudge # padding to help with escaped characters
                     if f.has_key('type'):
-                        field['type'] = ft[ f['type'] ]
-                        if field['type'] in ('date', 'uuid', 'integer', 'bigint', 'smallint'):
+                        if field.has_key('length') and field['length'] >= 256 and f['type'] == "esriFieldTypeString":
+                            field['type'] = 'text'
+                        else:
+                            field['type'] = ft[ f['type'] ]
+                        if field['type'] in ('date', 'uuid', 'integer', 'bigint', 'smallint', 'text'):
                             field.pop('length', None)
                     if not field['name'] == None:
                         fo.append(field)
@@ -192,6 +206,7 @@ class EsriJSON2Pg(object):
             if f.has_key('alias'):
                 if not f['name'] == f['alias']:
                     sql = sql + "\nCOMMENT ON COLUMN {0}.".format(tablename) + f['name'] + " IS '" + f['alias'] + "';"
+        logging.debug( sql )
         return sql
 
     def changeGeometry(self, geom=None, indx=None):
@@ -225,15 +240,21 @@ class EsriJSON2Pg(object):
             data = {}
             for k,v in self.srcjson['features'][i]['attributes'].iteritems():
                 data[ self.cleanFieldNames(k) ] = v
-            data['shape'] = self.changeGeometry(indx=i)
-            if not data['shape'] == None:
-                if upsert:
-                    pass
-                else:
-                    sql = "INSERT INTO {0} ({1}) VALUES ({2});".format(tablename, ",".join(map(lambda x: x['name'], self.fields)), ",".join(map(lambda x: "%("+x['name']+")s", self.fields)))
-                yield (sql, data)
-            i += 1
 
+            try:
+                data['shape'] = self.changeGeometry(indx=i)
+            except:
+                logging.error( 'Cannot determine shape. Feature index: {0}'.format(i) )
+                logging.debug( data )
+                sys.exit(2)
+
+            if upsert:
+                pass
+            else:
+                sql = "INSERT INTO {0} ({1}) VALUES ({2});".format(tablename, ",".join(map(lambda x: x['name'], self.fields)), ",".join(map(lambda x: "%("+x['name']+")s", self.fields)))
+            
+            yield (sql, data)
+            i += 1
 
 if __name__ == "__main__":
     import sys
@@ -247,13 +268,13 @@ if __name__ == "__main__":
     # example: "gisdata.tablename"
 
     if len(sys.argv) < 4:
-        print "Too few parameters.\nUSAGE: {0} restapiurl pgconnstr tblname".format(sys.argv[0])
+        logging.error( "Too few parameters.\nUSAGE: {0} restapiurl pgconnstr tblname".format(sys.argv[0]) )
         sys.exit(2)
 
     urlm = re.match("https?://([\w\:\.\-]+)(/.*)", sys.argv[1])
     domain = urlm.groups()[0]
     path   = urlm.groups()[1]
-    print domain
+    logging.debug( domain )
     if(sys.argv[1][:5].lower() == 'https'):
         webconn = httplib.HTTPSConnection(domain, timeout=360)
     else:
@@ -268,42 +289,44 @@ if __name__ == "__main__":
     tblsql = "select 1 from pg_tables where schemaname = %s and tablename = %s"
     cur.execute(tblsql,sys.argv[3].split('.'))
     if cur.rowcount > 0:
-        print "Table exists."
+        logging.info( "Table exists." )
         ct = False
         maxsql = "select max(objectid) from {0}".format(sys.argv[3])
         cur.execute(maxsql)
         row = cur.next()
         dbmax = row[0]
-        print "Highest OID in table: {0}".format(dbmax)
+        logging.info( "Highest OID in table: {0}".format(dbmax) )
     else:
-        print "Table does not exist."
+        logging.info( "Table does not exist." )
 
     for l in oids:
         if dbmax >= l[1]:
             continue
-        print "Requesting {0} <= objectid <= {1}".format(l[0],l[1])
+        logging.info( "Requesting {0} <= objectid <= {1}".format(l[0],l[1]) )
         if not ct:
             try:
                 chksql = "select 1 from {0} where objectid between %s and %s".format(sys.argv[3])
                 cur.execute(chksql, l)
                 if cur.rowcount > 0:
-                    print "Record exist; skipping {0} through {1}".format(*l)
+                    logging.info( "Record exist; skipping {0} through {1}".format(*l) )
                     continue
             except Exception, e:
-                print e
-                print traceback.format_exc()
+                logging.error( e )
+                logging.error( traceback.format_exc() )
         
         try:
             qs = "?where=objectid+>%3D+{0}+AND+objectid+<%3D+{1}&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=true&maxAllowableOffset=&geometryPrecision=&outSR=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&returnDistinctValues=false&f=pjson".format(l[0],l[1])
             webconn.request('GET', path+qs)
             webresp = webconn.getresponse()
             arcjson = webresp.read()
+            logging.debug( arcjson )
             jp = EsriJSON2Pg(arcjson)
             if ct:
                 cur.execute(jp.createTable(sys.argv[3]))
                 ct = False
             i = 0
             for data in jp.insertStatements(tablename=sys.argv[3]):
+                logging.debug( data )
                 if not data[1] == None:
                     cur.execute(data[0], data[1])
                 i += 1
