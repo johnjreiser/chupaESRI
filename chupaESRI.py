@@ -44,7 +44,8 @@ logging.basicConfig(level=logging.INFO)
 
 class EsriJSON2Pg(object):
     """Convert ESRI JSON response from ArcGIS Server's Query service to PostgreSQL CREATE TABLE and INSERTs."""
-    def __init__(self, jsonstr, arcgisurl=None):
+    def __init__(self, jsonstr, arcgisurl=None, chunkSize=1000):
+        self.chunkSize = int(chunkSize)
         if(type(arcgisurl) == type("")):
             self.remote_url = arcgisurl
             self.remote_url_components = urlsplit(arcgisurl)
@@ -158,12 +159,21 @@ class EsriJSON2Pg(object):
             else:
                 oid = {'oidmin':0, 'oidmax':response['count']}
             self.oidrange = oid
-            return [(f, f+999) for f in xrange(oid['oidmin'], oid['oidmax'], 1000)]
+            try:
+                return [(f, f+(self.chunkSize-1)) for f in xrange(oid['oidmin'], oid['oidmax'], self.chunkSize)]
+            except Exception as e:
+                logging.critical("Unable to generate OID ranges.")
+                logging.critical(e)
+                logging.critical(oid)
+                logging.critical(self.chunkSize)
+                sys.exit(2)
+
             #### TO-DO: probably should have it look for maxRecordCount to populate the range
         except Exception as e:
             logging.debug(url+qs)
             logging.debug(response)
-            logging.error(e)
+            logging.critical(e)
+            sys.exit(2)
 
     def convertFields(self):
         fudge = 5 # default value to pad out character varying types
@@ -311,11 +321,11 @@ if __name__ == "__main__":
     parser.add_argument('pgconn', help='PostgreSQL connection string')
     parser.add_argument('table', help='Schema-qualified table name (e.g. public.housingpts)')
     parser.add_argument('-o', '--oids', nargs=2, type=int, help='Request a specific set of OBJECTIDs, low and high bounds')
-    parser.add_argument('-n', '--chunk', nargs=1, type=int, default=1000, help='Size of each request. Default 1000.')
+    parser.add_argument('-n', '--chunk', type=int, default=1000, help='Size of each request. Default 1000.')
 
     argv = parser.parse_args()
 
-    chupa = EsriJSON2Pg("", argv.rest)
+    chupa = EsriJSON2Pg("", argv.rest, chunkSize=argv.chunk)
     urlm = chupa.remote_url_components
     domain = urlm[1]
     path   = "".join(urlm[2:3])
