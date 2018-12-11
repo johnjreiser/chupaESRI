@@ -265,7 +265,12 @@ class EsriJSON2Pg(object):
                 return None
             for ring in geom['rings']:
                 if len(ring) <= 3: # needed to trim slivers/self-intersections
+                    logging.warn("Encountered less than 3 vertices in ring.")
                     return None
+                if ring[0] != ring[-1]:
+                    logging.warn("Beginning and end of ring does not match.")
+                    ring.append(ring[0])
+
             if self.geomType in ("POLYGON","MULTIPOLYGON"):
                 WKT = "SRID={0};{1}".format(self.sr, self.geomType) + str(geom['rings']).replace("[","(").replace("]",")")
                 WKT = re.sub(r'(\d)\,', r'\1', WKT)
@@ -299,7 +304,9 @@ class EsriJSON2Pg(object):
             if upsert:
                 pass
             else:
-                sql = "INSERT INTO {0} ({1}) VALUES ({2});".format(tablename, ",".join(map(lambda x: x['name'], self.fields)), ",".join(map(lambda x: "%("+x['name']+")s", self.fields)))
+                sql = "INSERT INTO {0} ({1}) VALUES ({2});".format(tablename,
+                        ",".join(map(lambda x: x['name'], self.fields)), 
+                        ",".join(map(lambda x: "%("+x['name']+")s", self.fields)))
             
             yield (sql, data)
             i += 1
