@@ -1,4 +1,4 @@
-#!/usr/local/bin/python3
+#!/usr/bin/env python3
 """
 chupaESRI.py
 version:           0.4 (2019-07-22)
@@ -39,6 +39,7 @@ You should have received a copy of the GNU General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
 import re
+import os
 import psycopg2
 import argparse
 import logging
@@ -46,7 +47,9 @@ import requests
 from urllib.parse import quote
 
 _web_mercator = 3857
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s",
+        level=os.environ.get('LOGLEVEL', 'WARNING').upper()
+    )
 
 
 class QueryException(Exception):
@@ -293,12 +296,11 @@ def _get_endpoint_destination(in_endpoint_url):
     :return:                A dict containing the domain name and the endpoint name
     """
     try:
-        groups = re.match("https?://([\w\:\.\-]+)(/.*)", in_endpoint_url).groups()
+        groups = re.match(r"https?://([\w\:\.\-]+)(/.*)", in_endpoint_url).groups()
         domain = f"{'https' if in_endpoint_url[:5] == 'https' else 'http'}://{groups[0]}"
         return dict(domain=domain, path=groups[1])
     except IndexError:
         raise IOError("Invalid url entered.")
-
 
 def _validate_srid(in_srid):
     """
@@ -345,11 +347,13 @@ def _check_oid_range(in_domain, in_path):
     dpr = re.match(r"/([\w\/]*)/rest/services", in_path, re.IGNORECASE)
     version_path_url = f"{dpr.group(1) if dpr else 'arcgis'}/rest/services/"
     version = requests.get(f"{in_domain}/{version_path_url}", params=dict(f="pjson")).json()['currentVersion']
+    logging.debug(version)
     q_url = f"{in_domain}{in_path}"
+    logging.debug(q_url)
     if version < 10.1:
         q_url += "?text=&geometry=&geometryType=esriGeometryPoint&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&objectIds=&where=objectid+>+-1&time=&returnCountOnly=true&returnIdsOnly=false&returnGeometry=false&maxAllowableOffset=&outSR=&outFields=&f=pjson"
     else:
-        q_url += quote("""?where=&outFields=*&returnGeometry=false&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=[{%0D%0A++++"statisticType"%3A+"count"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidcount"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"min"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidmin"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"max"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidmax"%0D%0A++}]&returnZ=false&returnM=false&returnDistinctValues=false&f=pjson""")
+        q_url += """?where=&outFields=*&returnGeometry=false&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=[{%0D%0A++++"statisticType"%3A+"count"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidcount"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"min"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidmin"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"max"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidmax"%0D%0A++}]&returnZ=false&returnM=false&returnDistinctValues=false&f=pjson"""
     try:
         response = requests.get(q_url).json()
         if version >= 10.1:
@@ -360,6 +364,7 @@ def _check_oid_range(in_domain, in_path):
         return [(f, f + 999) for f in range(oid['oidmin'], oid['oidmax'], 1000)]
         # todo: probably should have it look for maxRecordCount to populate the range
     except Exception as e:
+        logging.debug(q_url)
         logging.error(e)
         raise
 
@@ -412,6 +417,7 @@ def main(cmd_line):
 
     # check to see if table exists
     table_sql = "select 1 from pg_tables where schemaname = %s and tablename = %s"
+    logging.debug( cur.mogrify(table_sql, tbl_parts) )
     cur.execute(table_sql, tbl_parts)
 
     # record found, table already exists
