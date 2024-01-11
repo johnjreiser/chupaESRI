@@ -51,6 +51,7 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s",
         level=os.environ.get('LOGLEVEL', 'WARNING').upper()
     )
 
+objectid_field_name = "OBJECTID"
 
 class QueryException(Exception):
     """
@@ -350,14 +351,27 @@ def _check_oid_range(in_domain, in_path):
     logging.debug(version)
     q_url = f"{in_domain}{in_path}"
     logging.debug(q_url)
+
+    try:
+        global objectid_field_name
+        oid_query = "?f=json&where=1%3D1&resultRecordCount=1"
+        oid_url = q_url + oid_query
+        oid_response = requests.get(oid_url).json()
+        logging.debug(oid_response)
+        if "objectIdFieldName" in oid_response:
+            objectid_field_name = oid_response["objectIdFieldName"]
+    except Exception as e:
+        logging.error(e)
+
     if version < 10.1:
-        q_url += "?text=&geometry=&geometryType=esriGeometryPoint&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&objectIds=&where=objectid+>+-1&time=&returnCountOnly=true&returnIdsOnly=false&returnGeometry=false&maxAllowableOffset=&outSR=&outFields=&f=pjson"
+        q_url += f"?text=&geometry=&geometryType=esriGeometryPoint&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&objectIds=&where={objectid_field_name}+>+-1&time=&returnCountOnly=true&returnIdsOnly=false&returnGeometry=false&maxAllowableOffset=&outSR=&outFields=&f=pjson"
     else:
-        q_url += """?where=&outFields=*&returnGeometry=false&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=[{%0D%0A++++"statisticType"%3A+"count"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidcount"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"min"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidmin"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"max"%2C%0D%0A++++"onStatisticField"%3A+"objectid"%2C+++++"outStatisticFieldName"%3A+"oidmax"%0D%0A++}]&returnZ=false&returnM=false&returnDistinctValues=false&f=pjson"""
+        q_url += '?where=&outFields=*&returnGeometry=false&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=[{%0D%0A++++"statisticType"%3A+"count"%2C%0D%0A++++"onStatisticField"%3A+"'+objectid_field_name+'"%2C+++++"outStatisticFieldName"%3A+"oidcount"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"min"%2C%0D%0A++++"onStatisticField"%3A+"'+objectid_field_name+'"%2C+++++"outStatisticFieldName"%3A+"oidmin"%0D%0A++}%2C{%0D%0A++++"statisticType"%3A+"max"%2C%0D%0A++++"onStatisticField"%3A+"'+objectid_field_name+'"%2C+++++"outStatisticFieldName"%3A+"oidmax"%0D%0A++}]&returnZ=false&returnM=false&returnDistinctValues=false&f=pjson'
     try:
         response = requests.get(q_url).json()
         if version >= 10.1:
             # force keys to lowercase - not always returned lower
+            logging.debug(response)
             oid = dict((k.lower(), v) for k, v in response['features'][0]['attributes'].items())
         else:
             oid = {'oidmin':0, 'oidmax':response['count']}
@@ -453,7 +467,7 @@ def main(cmd_line):
 
         # make request for new records
         try:
-            qs = f"?where=objectid+>%3D+{l[0]}+AND+objectid+<%3D+{l[1]}&text=&objectIds=&time=&geometry=" \
+            qs = f"?where={objectid_field_name}+>%3D+{l[0]}+AND+{objectid_field_name}+<%3D+{l[1]}&text=&objectIds=&time=&geometry=" \
                  f"&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=" \
                  f"&outFields=*&returnGeometry=true&maxAllowableOffset=&geometryPrecision=&outSR=&returnIdsOnly=false" \
                  f"&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false" \
